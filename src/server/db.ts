@@ -1,5 +1,5 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
-import { PAYMENT_POLL_INTERVAL_DEFAULT_SECONDS } from "../shared/contracts";
+import { CHECKOUT_SUPPORT_MESSAGE_DEFAULT, PAYMENT_POLL_INTERVAL_DEFAULT_SECONDS } from "../shared/contracts";
 import { getRuntimeEnv } from "./env";
 
 export type AppDatabase = Database;
@@ -153,6 +153,7 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
   collection_mode: "business_qr",
   transfer_link_layer: 2,
   payment_poll_interval_seconds: PAYMENT_POLL_INTERVAL_DEFAULT_SECONDS,
+  checkout_support_message: CHECKOUT_SUPPORT_MESSAGE_DEFAULT,
   business_qr_url: "",
   alipay_app_id: "",
   alipay_endpoint: "https://openapi.alipay.com",

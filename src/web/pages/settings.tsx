@@ -3,6 +3,7 @@ import { type FormEvent, useState } from "react";
 import useSWR from "swr";
 import { toast } from "sonner";
 import {
+  CHECKOUT_SUPPORT_MESSAGE_MAX_LENGTH,
   PAYMENT_POLL_INTERVAL_MAX_SECONDS,
   PAYMENT_POLL_INTERVAL_MIN_SECONDS,
   type CollectionMode,
@@ -40,6 +41,7 @@ function SettingsForm({ initial, refresh }: { initial: SettingsData; refresh: ()
   const [paymentPollInterval, setPaymentPollInterval] = useState(String(initial.payment_poll_interval_seconds));
   const [v1Enabled, setV1Enabled] = useState(initial.v1_enabled);
   const [v2Enabled, setV2Enabled] = useState(initial.v2_enabled);
+  const [supportMessage, setSupportMessage] = useState(initial.checkout_support_message);
   const [saving, setSaving] = useState(false);
 
   async function save(event: FormEvent) {
@@ -50,6 +52,7 @@ function SettingsForm({ initial, refresh }: { initial: SettingsData; refresh: ()
         method: "PUT",
         ...jsonBody({
           public_base_url: baseUrl,
+          checkout_support_message: supportMessage,
           collection_mode: mode,
           transfer_user_id: transferUserId,
           transfer_link_layer: transferLinkLayer,
@@ -78,7 +81,7 @@ function SettingsForm({ initial, refresh }: { initial: SettingsData; refresh: ()
           <div className="grid gap-3 md:grid-cols-2">
             <button type="button" onClick={() => setMode("business_qr")} className={cn("rounded-lg border p-4 text-left transition-colors", mode === "business_qr" ? "border-primary bg-primary/5" : "hover:bg-foreground/[0.025]")}>
               <div className="flex items-center justify-between"><span className="flex items-center gap-2 font-semibold"><QrCode className="size-4 text-primary" />经营码</span><Badge variant={mode === "business_qr" ? "primary" : "outline"}>{mode === "business_qr" ? "当前使用" : "推荐"}</Badge></div>
-              <p className="mt-2 text-sm leading-5 text-muted">上传支付宝经营码，订单实付金额在原价上增加 0.01–0.99 元并精确匹配。</p>
+              <p className="mt-2 text-sm leading-5 text-muted">上传支付宝经营码，优先使用原金额；被占用时再增加 0.01–0.99 元，并按实付金额精确匹配。</p>
             </button>
             <button type="button" onClick={() => setMode("transfer")} className={cn("rounded-lg border p-4 text-left transition-colors", mode === "transfer" ? "border-primary bg-primary/5" : "hover:bg-foreground/[0.025]")}>
               <div className="flex items-center justify-between"><span className="flex items-center gap-2 font-semibold"><Send className="size-4 text-primary" />转账备注</span><Badge variant={mode === "transfer" ? "primary" : "outline"}>{mode === "transfer" ? "当前使用" : "兼容模式"}</Badge></div>
@@ -161,6 +164,15 @@ function SettingsForm({ initial, refresh }: { initial: SettingsData; refresh: ()
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between gap-4 rounded-md border p-4"><div><div className="text-sm font-medium">V1 MD5</div><p className="mt-1 text-xs text-muted">submit.php、mapi.php 与 api.php 查询。</p></div><Switch checked={v1Enabled} onCheckedChange={setV1Enabled} aria-label="启用 V1 API" /></div>
           <div className="flex items-center justify-between gap-4 rounded-md border p-4"><div><div className="text-sm font-medium">V2 RSA</div><p className="mt-1 text-xs text-muted">支付、订单查询与商户信息接口。</p></div><Switch checked={v2Enabled} onCheckedChange={setV2Enabled} aria-label="启用 V2 API" /></div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>收银台客服提示</CardTitle><CardDescription>显示在收银台金额说明下方及支付结果页面，保存后立即生效。</CardDescription></CardHeader>
+        <CardContent className="space-y-2">
+          <Label htmlFor="checkout-support-message">客服提示内容</Label>
+          <Textarea id="checkout-support-message" rows={4} maxLength={CHECKOUT_SUPPORT_MESSAGE_MAX_LENGTH} value={supportMessage} onChange={(event) => setSupportMessage(event.target.value)} placeholder="填写客服邮箱、联系方式及查询订单所需信息" />
+          <p className="text-xs text-muted">支持换行，最多 {CHECKOUT_SUPPORT_MESSAGE_MAX_LENGTH} 字；清空后不显示。内容按纯文本展示。</p>
         </CardContent>
       </Card>
 

@@ -1,3 +1,4 @@
+import { CHECKOUT_SUPPORT_MESSAGE_DEFAULT } from "../shared/contracts";
 import type { ApiVersion, CheckoutData, CollectionMode, OrderRecord, OrderStatus, TransferLinkLayer } from "../shared/contracts";
 import { getSetting, type AppDatabase } from "./db";
 import { AppError, assert } from "./errors";
@@ -92,7 +93,7 @@ export function createOrder(database: AppDatabase, rawInput: CreateOrderInput): 
     if (collectionMode === "business_qr") {
       const maxOffset = Math.max(1, Math.min(99, getSetting(database, "surcharge_max_cents", 99)));
       let allocated = false;
-      for (let offset = 1; offset <= maxOffset; offset += 1) {
+      for (let offset = 0; offset <= maxOffset; offset += 1) {
         const candidate = input.requestedAmountCents + offset;
         const occupied = database.query("SELECT 1 FROM amount_reservations WHERE amount_cents = ? LIMIT 1").get(candidate);
         if (!occupied) {
@@ -379,6 +380,7 @@ export function getCheckoutData(database: AppDatabase, token: string, signedRetu
     monitor_until: order.monitor_until,
     payment_poll_interval_seconds: getPaymentPollIntervalSeconds(database),
     payment_uri: order.collection_mode === "transfer" ? createTransferUri(order, transferUserId, transferLinkLayer) : "",
+    checkout_support_message: getSetting(database, "checkout_support_message", CHECKOUT_SUPPORT_MESSAGE_DEFAULT),
     business_qr_url: businessQrUrl,
     return_url: order.return_url,
     return_target: signedReturnUrl ?? null,

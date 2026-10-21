@@ -1,4 +1,5 @@
 import {
+  CHECKOUT_SUPPORT_MESSAGE_DEFAULT,
   PAYMENT_POLL_INTERVAL_DEFAULT_SECONDS,
   PAYMENT_POLL_INTERVAL_MAX_SECONDS,
   PAYMENT_POLL_INTERVAL_MIN_SECONDS,
@@ -41,6 +42,7 @@ export function getPublicSettings(database: AppDatabase): PublicSettings {
     collection_mode: getSetting<CollectionMode>(database, "collection_mode", "business_qr"),
     transfer_link_layer: getSetting<TransferLinkLayer>(database, "transfer_link_layer", 2),
     payment_poll_interval_seconds: getPaymentPollIntervalSeconds(database),
+    checkout_support_message: getSetting(database, "checkout_support_message", CHECKOUT_SUPPORT_MESSAGE_DEFAULT),
     business_qr_url: getSetting(database, "business_qr_url", ""),
     alipay_app_id: getSetting(database, "alipay_app_id", ""),
     alipay_endpoint: getSetting(database, "alipay_endpoint", "https://openapi.alipay.com"),

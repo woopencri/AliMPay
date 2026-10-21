@@ -10,6 +10,7 @@ export interface RuntimeEnv {
   databasePath: string;
   uploadDir: string;
   publicBaseUrl: string;
+  adminEntryPath: string | null;
   allowPrivateCallbacks: boolean;
   trustProxy: boolean;
   masterKey: Buffer;
@@ -45,6 +46,27 @@ function loadMasterKey(dataDir: string) {
   return Buffer.from(generated, "base64");
 }
 
+function loadAdminEntryPath(dataDir: string, nodeEnv: RuntimeEnv["nodeEnv"]) {
+  const configured = process.env.ADMIN_ENTRY_PATH?.trim();
+  const entryFile = resolve(dataDir, ".admin-entry-path");
+  let entryPath = configured;
+  if (!entryPath && nodeEnv !== "production") return null;
+  if (!entryPath) {
+    if (!existsSync(entryFile)) {
+      try {
+        writeFileSync(entryFile, `/admin-${randomBytes(24).toString("hex")}\n`, { flag: "wx", mode: 0o600 });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+    }
+    entryPath = readFileSync(entryFile, "utf8").trim();
+  }
+  if (!/^\/[A-Za-z0-9_-]{16,128}$/.test(entryPath)) {
+    throw new Error("ADMIN_ENTRY_PATH 必须以 / 开头，后接 16–128 位字母、数字、下划线或连字符");
+  }
+  return entryPath;
+}
+
 let cached: RuntimeEnv | undefined;
 
 export function getRuntimeEnv(): RuntimeEnv {
@@ -64,6 +86,7 @@ export function getRuntimeEnv(): RuntimeEnv {
     databasePath: resolve(dataDir, "alimpay.sqlite"),
     uploadDir,
     publicBaseUrl: (process.env.PUBLIC_BASE_URL ?? `http://localhost:${Number.isFinite(port) ? port : 3000}`).replace(/\/$/, ""),
+    adminEntryPath: loadAdminEntryPath(dataDir, nodeEnv),
     allowPrivateCallbacks: boolEnv(process.env.ALLOW_PRIVATE_CALLBACKS),
     trustProxy: boolEnv(process.env.TRUST_PROXY),
     masterKey: loadMasterKey(dataDir),

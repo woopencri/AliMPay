@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { CHECKOUT_SUPPORT_MESSAGE_DEFAULT } from "../src/shared/contracts";
 import { setSetting, type AppDatabase } from "../src/server/db";
 import {
   createTransferUri,
@@ -18,8 +19,28 @@ describe("order allocation and idempotency", () => {
   it("allocates unique cent amounts transactionally", () => {
     ({ database } = configuredDatabase());
     const orders = [1, 2, 3].map((index) => createOrder(database!, orderInput(index)).order);
-    expect(orders.map((order) => order.payable_amount_cents)).toEqual([101, 102, 103]);
+    expect(orders.map((order) => order.payable_amount_cents)).toEqual([100, 101, 102]);
     expect(new Set(orders.map((order) => order.payable_amount_cents)).size).toBe(3);
+  });
+
+  it("avoids collisions across different requested amounts and honors the pool limit", () => {
+    ({ database } = configuredDatabase());
+    setSetting(database, "surcharge_max_cents", 1);
+    const first = createOrder(database, orderInput(1)).order;
+    const second = createOrder(database, { ...orderInput(2), money: "1.01" }).order;
+    expect(first.payable_amount_cents).toBe(100);
+    expect(second.payable_amount_cents).toBe(101);
+    expect(() => createOrder(database!, orderInput(3))).toThrow(/待支付订单过多/);
+  });
+
+  it("retains paid amounts until the monitoring window ends", () => {
+    ({ database } = configuredDatabase());
+    const first = createOrder(database, orderInput(1)).order;
+    database.query("UPDATE orders SET status = 'paid' WHERE id = ?").run(first.id);
+    expect(createOrder(database, orderInput(2)).order.payable_amount_cents).toBe(101);
+    database.query("UPDATE amount_reservations SET reserved_until = ? WHERE order_id = ?")
+      .run(new Date(Date.now() - 1_000).toISOString(), first.id);
+    expect(createOrder(database, orderInput(3)).order.payable_amount_cents).toBe(100);
   });
 
   it("returns an identical duplicate and rejects an immutable conflict", () => {
@@ -110,6 +131,16 @@ describe("payment state machine", () => {
     setSetting(database, "payment_poll_interval_seconds", 12);
     const order = createOrder(database, orderInput(1)).order;
     expect(getCheckoutData(database, order.checkout_token)?.payment_poll_interval_seconds).toBe(12);
+  });
+
+  it("returns default, customized and hidden checkout support text", () => {
+    ({ database } = configuredDatabase());
+    const order = createOrder(database, orderInput(1)).order;
+    expect(getCheckoutData(database, order.checkout_token)?.checkout_support_message).toBe(CHECKOUT_SUPPORT_MESSAGE_DEFAULT);
+    setSetting(database, "checkout_support_message", "联系 help@example.com\n请附订单号");
+    expect(getCheckoutData(database, order.checkout_token)?.checkout_support_message).toBe("联系 help@example.com\n请附订单号");
+    setSetting(database, "checkout_support_message", "");
+    expect(getCheckoutData(database, order.checkout_token)?.checkout_support_message).toBe("");
   });
 
   it("maps expired to unpaid and late paid to paid externally", () => {

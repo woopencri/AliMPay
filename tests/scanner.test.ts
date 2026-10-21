@@ -31,8 +31,8 @@ describe("shared payment scanner", () => {
     const first = createOrder(database, orderInput(1)).order;
     const second = createOrder(database, orderInput(2)).order;
     const provider = new FakeProvider([
-      { account_log_id: "A1", trans_dt: new Date().toISOString(), direction: "收入", trans_amount: "1.01", alipay_order_no: "ALI1" },
-      { account_log_id: "A2", trans_dt: new Date().toISOString(), direction: "收入", trans_amount: "1.02", alipay_order_no: "ALI2" },
+      { account_log_id: "A1", trans_dt: new Date().toISOString(), direction: "收入", trans_amount: "1.00", alipay_order_no: "ALI1" },
+      { account_log_id: "A2", trans_dt: new Date().toISOString(), direction: "收入", trans_amount: "1.01", alipay_order_no: "ALI2" },
     ]);
     const scanner = new PaymentScanner(database, provider);
     const result = await scanner.scanNow();

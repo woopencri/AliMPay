@@ -1,7 +1,7 @@
 services:
   alimpay:
     build: .
-    image: alimpay-bun:local
+    image: ${ALIMPAY_IMAGE:-alimpay-bun:local}
     restart: unless-stopped
     ports:
       - "127.0.0.1:3000:3000"
@@ -12,6 +12,7 @@ services:
       DATA_DIR: /data
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?请设置 PUBLIC_BASE_URL}
       APP_MASTER_KEY: ${APP_MASTER_KEY:-}
+      ADMIN_ENTRY_PATH: ${ADMIN_ENTRY_PATH:-}
       TRUST_PROXY: "true"
       ALLOW_PRIVATE_CALLBACKS: "false"
     volumes:

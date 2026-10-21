@@ -3,6 +3,7 @@ import { extname, resolve, sep } from "node:path";
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { createAdminRoutes } from "./admin";
+import { adminEntryGuard, hasAdminEntryAccess } from "./admin-entry";
 import { PaymentScanner } from "./alipay";
 import { getDatabase, type AppDatabase } from "./db";
 import { createEasyPayRoutes } from "./easypay";
@@ -42,7 +43,7 @@ export function createApp(services?: Partial<AppServices>) {
   app.use("*", secureHeaders({
     xFrameOptions: "DENY",
     xXssProtection: "0",
-    referrerPolicy: "strict-origin-when-cross-origin",
+    referrerPolicy: "no-referrer",
     contentSecurityPolicy: getRuntimeEnv().nodeEnv === "production" ? {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'"],
@@ -67,12 +68,14 @@ export function createApp(services?: Partial<AppServices>) {
         event: "http_request",
         request_id: requestId,
         method: c.req.method,
-        path: c.req.path,
+        path: c.req.path === getRuntimeEnv().adminEntryPath ? "[admin-entry]" : c.req.path,
         status: c.res.status,
         duration_ms: Math.round((performance.now() - started) * 10) / 10,
       }));
     }
   });
+
+  app.use("*", adminEntryGuard);
 
   app.get("/healthz", (c) => c.json({ ok: true, version: "1.0.0", bun: Bun.version }));
   app.get("/readyz", (c) => {
@@ -114,24 +117,38 @@ export function createApp(services?: Partial<AppServices>) {
 
   app.notFound(async (c) => {
     if (c.req.method !== "GET" && c.req.method !== "HEAD") return c.json({ error: "NOT_FOUND", message: "接口不存在" }, 404);
-    const clientRoot = resolve(process.cwd(), "dist/client");
-    if (!existsSync(clientRoot)) return c.json({ error: "FRONTEND_NOT_BUILT", message: "前端尚未构建，请在开发环境使用 Vite 端口 5173" }, 404);
     const requestPath = decodeURIComponent(new URL(c.req.url).pathname);
+    const publicCheckout = /^\/checkout\/[A-Za-z0-9_-]+$/.test(requestPath);
+    const publicAsset = requestPath.startsWith("/assets/");
+    if (!publicCheckout && !publicAsset && !await hasAdminEntryAccess(c)) {
+      c.header("cache-control", "no-store");
+      return c.text("Not Found", 404);
+    }
+    if (!publicCheckout && !publicAsset) {
+      c.header("x-robots-tag", "noindex, nofollow, noarchive");
+      c.header("cache-control", "no-store");
+    }
+    const clientRoot = resolve(process.cwd(), "dist/client");
+    if (!existsSync(clientRoot)) {
+      if (publicAsset) return c.text("Not Found", 404);
+      return c.json({ error: "FRONTEND_NOT_BUILT", message: "前端尚未构建，请在开发环境使用 Vite 端口 5173" }, 404);
+    }
     const relative = requestPath.replace(/^\/+/, "");
     const candidate = resolve(clientRoot, relative || "index.html");
-    if (candidate.startsWith(`${clientRoot}${sep}`)) {
+    if (candidate.startsWith(`${clientRoot}${sep}`) && (!publicAsset || candidate.startsWith(`${resolve(clientRoot, "assets")}${sep}`))) {
       const asset = Bun.file(candidate);
       if (await asset.exists()) {
         return new Response(asset, {
           headers: {
             "content-type": ASSET_CONTENT_TYPES[extname(candidate)] ?? "application/octet-stream",
-            "cache-control": candidate.endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable",
+            "cache-control": candidate.endsWith("index.html") ? "no-store" : "public, max-age=31536000, immutable",
           },
         });
       }
     }
+    if (publicAsset) return c.text("Not Found", 404);
     const index = Bun.file(resolve(clientRoot, "index.html"));
-    return new Response(index, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" } });
+    return new Response(index, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": publicCheckout ? "no-cache" : "no-store" } });
   });
 
   app.onError((error, c) => {

@@ -10,6 +10,20 @@ function md5(parameters: Record<string, string>, key: string) {
   return createHash("md5").update(`${canonical}${key}`).digest("hex");
 }
 
+const supportMessage = "充值问题请联系 lin@linapi.net。\n请提供订单号以便查询。";
+
+test.beforeEach(async ({ page }) => {
+  await page.goto("/admin-e2e-0123456789abcdef");
+});
+
+test("anonymous visitors cannot open the site root or admin APIs", async ({ request }) => {
+  for (const route of ["/", "/login", "/setup", "/admin-api/setup/status"]) {
+    const response = await request.get(route);
+    expect(response.status()).toBe(404);
+    expect(await response.text()).toBe("Not Found");
+  }
+});
+
 test("first-run setup, key generation, QR upload and public checkout", async ({ page, request }, testInfo) => {
   test.skip(testInfo.project.name === "mobile-chromium", "The full write flow runs once on desktop; mobile has a focused navigation assertion below.");
   await page.goto("/setup");
@@ -57,6 +71,8 @@ test("first-run setup, key generation, QR upload and public checkout", async ({ 
   await page.getByLabel("应用 ID").fill("2026000000000000");
   await page.getByLabel("支付宝公钥").fill(publicKey);
   await page.getByLabel("支付轮询间隔（秒）").fill("2");
+  await expect(page.getByLabel("客服提示内容")).toHaveValue("");
+  await page.getByLabel("客服提示内容").fill(supportMessage);
   await page.getByLabel("经营码图片").setInputFiles({
     name: "business-qr.png",
     mimeType: "image/png",
@@ -67,6 +83,7 @@ test("first-run setup, key generation, QR upload and public checkout", async ({ 
   await expect(page.getByText("配置已保存")).toBeVisible();
   await page.reload();
   await expect(page.getByLabel("支付轮询间隔（秒）")).toHaveValue("2");
+  await expect(page.getByLabel("客服提示内容")).toHaveValue(supportMessage);
 
   await page.getByRole("link", { name: "密钥中心" }).click();
   await page.getByRole("button", { name: "查看凭据" }).click();
@@ -92,9 +109,25 @@ test("first-run setup, key generation, QR upload and public checkout", async ({ 
   expect(response.ok(), responseText).toBeTruthy();
   const order = JSON.parse(responseText) as { code: number; payurl: string };
   expect(order.code).toBe(1);
+  await page.context().clearCookies();
   await page.goto(order.payurl);
-  await expect(page.getByRole("heading", { name: "¥1.01" })).toBeVisible({ timeout: 12_000 });
+  await expect(page.getByRole("heading", { name: "¥1.00" })).toBeVisible({ timeout: 12_000 });
+  await expect(page.getByText("支付宝安全收银台", { exact: true })).toBeVisible();
+  await expect(page.getByRole("img", { name: "支付宝", exact: true })).toBeVisible();
+  await expect(page).toHaveTitle("支付宝安全收银台");
   await expect(page.getByAltText("支付宝经营码")).toBeVisible();
+  await expect(page.getByText(supportMessage, { exact: true })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+
+  const another = { ...unsigned, out_trade_no: `E2E-SURCHARGE-${Date.now()}` };
+  const surchargeResponse = await request.post("/mapi.php", { form: { ...another, sign: md5(another, key) } });
+  const surchargeOrder = await surchargeResponse.json() as { code: number; payurl: string };
+  expect(surchargeOrder.code).toBe(1);
+  await page.goto(surchargeOrder.payurl);
+  await expect(page.getByRole("heading", { name: "¥1.01" })).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("请务必按精确金额 ¥1.01 付款");
+  await page.screenshot({ path: testInfo.outputPath("checkout-surcharge.png"), fullPage: true });
+  await expect(page.getByText(supportMessage, { exact: true })).toBeVisible();
 });
 
 test("mobile navigation is usable and transfer checkout opens Alipay", async ({ page }, testInfo) => {

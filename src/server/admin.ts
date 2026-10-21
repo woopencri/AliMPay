@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { z } from "zod";
 import {
+  CHECKOUT_SUPPORT_MESSAGE_MAX_LENGTH,
   PAYMENT_POLL_INTERVAL_MAX_SECONDS,
   PAYMENT_POLL_INTERVAL_MIN_SECONDS,
   type OrderStatus,
@@ -258,10 +259,19 @@ export function createAdminRoutes(database: AppDatabase, scanner: PaymentScanner
     const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
     const allowed = new Set([
       "public_base_url", "collection_mode", "transfer_user_id", "alipay_app_id",
-      "transfer_link_layer", "payment_poll_interval_seconds", "alipay_endpoint", "alipay_public_key", "v1_enabled", "v2_enabled",
+      "transfer_link_layer", "payment_poll_interval_seconds", "alipay_endpoint", "alipay_public_key", "v1_enabled", "v2_enabled", "checkout_support_message",
     ]);
     for (const key of Object.keys(body)) {
       if (!allowed.has(key)) throw new AppError(400, "UNKNOWN_SETTING", `不支持设置项 ${key}`);
+    }
+    if (body.checkout_support_message !== undefined) {
+      assert(
+        typeof body.checkout_support_message === "string" && body.checkout_support_message.length <= CHECKOUT_SUPPORT_MESSAGE_MAX_LENGTH,
+        400,
+        "INVALID_CHECKOUT_SUPPORT_MESSAGE",
+        `收银台客服提示须为不超过 ${CHECKOUT_SUPPORT_MESSAGE_MAX_LENGTH} 字的文本`,
+      );
+      setSetting(database, "checkout_support_message", (body.checkout_support_message as string).trim());
     }
     if (typeof body.public_base_url === "string") setSetting(database, "public_base_url", validatePublicBaseUrl(body.public_base_url));
     if (body.collection_mode === "business_qr" || body.collection_mode === "transfer") setSetting(database, "collection_mode", body.collection_mode);
