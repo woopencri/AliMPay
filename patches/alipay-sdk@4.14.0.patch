@@ -1,0 +1,66 @@
+diff --git a/dist/esm/alipay.js b/dist/esm/alipay.js
+--- a/dist/esm/alipay.js
++++ b/dist/esm/alipay.js
+@@ -205,6 +205,7 @@
+             method: httpMethod,
+             dataType: dataType === 'stream' ? 'stream' : 'text',
+             timeout: options?.requestTimeout ?? this.config.timeout,
++            signal: options?.signal,
+             dispatcher: this.#proxyAgent,
+         };
+         // 默认需要对响应做验签，确保响应是由支付宝返回的
+diff --git a/dist/commonjs/alipay.js b/dist/commonjs/alipay.js
+--- a/dist/commonjs/alipay.js
++++ b/dist/commonjs/alipay.js
+@@ -245,6 +245,7 @@
+             method: httpMethod,
+             dataType: dataType === 'stream' ? 'stream' : 'text',
+             timeout: options?.requestTimeout ?? this.config.timeout,
++            signal: options?.signal,
+             dispatcher: this.#proxyAgent,
+         };
+         // 默认需要对响应做验签，确保响应是由支付宝返回的
+diff --git a/dist/esm/alipay.d.ts b/dist/esm/alipay.d.ts
+--- a/dist/esm/alipay.d.ts
++++ b/dist/esm/alipay.d.ts
+@@ -114,6 +114,8 @@
+     appAuthToken?: string;
+     /** 请求超时时间，默认使用 config.timeout */
+     requestTimeout?: number;
++    /** Abort the underlying HTTP request, including response body reads. */
++    signal?: AbortSignal;
+     /** 支持覆盖默认的 agent  */
+     agent?: ProxyAgent;
+ }
+diff --git a/dist/commonjs/alipay.d.ts b/dist/commonjs/alipay.d.ts
+--- a/dist/commonjs/alipay.d.ts
++++ b/dist/commonjs/alipay.d.ts
+@@ -114,6 +114,8 @@
+     appAuthToken?: string;
+     /** 请求超时时间，默认使用 config.timeout */
+     requestTimeout?: number;
++    /** Abort the underlying HTTP request, including response body reads. */
++    signal?: AbortSignal;
+     /** 支持覆盖默认的 agent  */
+     agent?: ProxyAgent;
+ }
+diff --git a/src/alipay.ts b/src/alipay.ts
+--- a/src/alipay.ts
++++ b/src/alipay.ts
+@@ -167,6 +167,8 @@
+   appAuthToken?: string;
+   /** 请求超时时间，默认使用 config.timeout */
+   requestTimeout?: number;
++  /** Abort the underlying HTTP request, including response body reads. */
++  signal?: AbortSignal;
+   /** 支持覆盖默认的 agent  */
+   agent?: ProxyAgent;
+ }
+@@ -342,6 +344,7 @@
+       method: httpMethod,
+       dataType: dataType === 'stream' ? 'stream' : 'text',
+       timeout: options?.requestTimeout ?? this.config.timeout,
++      signal: options?.signal,
+       dispatcher: this.#proxyAgent,
+     };
+     // 默认需要对响应做验签，确保响应是由支付宝返回的

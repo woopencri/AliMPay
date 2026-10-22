@@ -9,7 +9,7 @@ import {
   PAYMENT_POLL_INTERVAL_MIN_SECONDS,
   type OrderStatus,
 } from "../shared/contracts";
-import { OfficialAlipayProvider, type PaymentScanner } from "./alipay";
+import { OfficialAlipayProvider, queryAccountLogPage, type PaymentScanner } from "./alipay";
 import {
   CSRF_COOKIE,
   SESSION_COOKIE,
@@ -396,7 +396,7 @@ export function createAdminRoutes(database: AppDatabase, scanner: PaymentScanner
   app.post("/alipay/test", async (c) => {
     const provider = new OfficialAlipayProvider(database);
     const now = new Date();
-    const result = await provider.query({
+    const result = await queryAccountLogPage(provider, {
       startTime: shanghaiTime(new Date(now.getTime() - 5 * 60_000)),
       endTime: shanghaiTime(now),
       pageNo: 1,

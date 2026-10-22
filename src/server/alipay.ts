@@ -14,8 +14,50 @@ export interface AccountLogPage {
   details: Array<Record<string, unknown>>;
 }
 
+export const ACCOUNT_LOG_QUERY_TIMEOUT_MS = 10_000;
+export const PAYMENT_SCAN_TIMEOUT_MS = 60_000;
+
+export interface AccountLogQuery {
+  startTime: string;
+  endTime: string;
+  pageNo: number;
+  pageSize: number;
+}
+
 export interface AccountLogProvider {
-  query(input: { startTime: string; endTime: string; pageNo: number; pageSize: number }): Promise<AccountLogPage>;
+  query(input: AccountLogQuery, signal?: AbortSignal): Promise<AccountLogPage>;
+}
+
+// Bound the wait independently of the SDK. A late response only settles the
+// discarded promise; it never resumes a timed-out scan or matches an order.
+export async function queryAccountLogPage(
+  provider: AccountLogProvider,
+  input: AccountLogQuery,
+  timeoutMs = ACCOUNT_LOG_QUERY_TIMEOUT_MS,
+  timeoutError = new AppError(504, "ALIPAY_QUERY_TIMEOUT", `支付宝账务查询超过 ${timeoutMs} 毫秒，已取消；后续扫描会自动重试`),
+): Promise<AccountLogPage> {
+  const controller = new AbortController();
+  const expiresAt = performance.now() + timeoutMs;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(timeoutError);
+      controller.abort(timeoutError);
+    }, timeoutMs);
+  });
+  try {
+    const page = await Promise.race([
+      Promise.resolve().then(() => provider.query(input, controller.signal)),
+      deadline,
+    ]);
+    if (performance.now() >= expiresAt) {
+      controller.abort(timeoutError);
+      throw timeoutError;
+    }
+    return page;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -29,7 +71,8 @@ export function prepareAlipaySdkPem(value: string) {
 export class OfficialAlipayProvider implements AccountLogProvider {
   constructor(private readonly database: AppDatabase) {}
 
-  async query(input: { startTime: string; endTime: string; pageNo: number; pageSize: number }): Promise<AccountLogPage> {
+  async query(input: AccountLogQuery, signal?: AbortSignal): Promise<AccountLogPage> {
+    signal?.throwIfAborted();
     const appId = getSetting(this.database, "alipay_app_id", "");
     const privateKey = getSecret(this.database, "alipay_private_key");
     const alipayPublicKey = getSetting(this.database, "alipay_public_key", "");
@@ -48,9 +91,7 @@ export class OfficialAlipayProvider implements AccountLogProvider {
       camelcase: false,
     });
     const result = await sdk.curl<Record<string, unknown>>(
-      "GET",
-      "/v3/alipay/data/bill/accountlog/query",
-      {
+      "GET", "/v3/alipay/data/bill/accountlog/query", {
         query: {
           start_time: input.startTime,
           end_time: input.endTime,
@@ -58,6 +99,8 @@ export class OfficialAlipayProvider implements AccountLogProvider {
           page_size: input.pageSize,
         },
         requestTimeout: 8_000,
+        // The pinned SDK patch forwards AbortSignal to its HTTP transport.
+        signal: signal ?? AbortSignal.timeout(ACCOUNT_LOG_QUERY_TIMEOUT_MS),
       },
     );
     const data = asRecord(result.data);
@@ -124,6 +167,11 @@ export interface ScanResult {
   traceId: string;
 }
 
+interface ScannerTimeouts {
+  queryTimeoutMs?: number;
+  scanTimeoutMs?: number;
+}
+
 export class PaymentScanner {
   private inFlight: Promise<ScanResult> | null = null;
   private lastCompletedAt = 0;
@@ -132,7 +180,18 @@ export class PaymentScanner {
   constructor(
     private readonly database: AppDatabase,
     private readonly provider: AccountLogProvider = new OfficialAlipayProvider(database),
-  ) {}
+    private readonly timeouts: ScannerTimeouts = {},
+  ) {
+    // One application process owns scanning for this database. A running row
+    // from the previous process cannot finish after a restart.
+    const interrupted = database.query(`
+      UPDATE scan_runs SET status = 'error', finished_at = ?, error = ?
+      WHERE status = 'running'
+    `).run(new Date().toISOString(), "SCAN_INTERRUPTED: 服务已重启，上次扫描已中断；新订单将继续自动扫描").changes;
+    if (interrupted > 0) {
+      audit(database, "payment.scan_interrupted", { details: { runs: interrupted } });
+    }
+  }
 
   get lastScanAt() {
     return this.lastCompletedAt;
@@ -158,10 +217,15 @@ export class PaymentScanner {
   async ensureFresh(order: OrderRecord) {
     if (!["pending", "expired"].includes(order.status) || Date.parse(order.monitor_until) <= Date.now()) return;
     if (Date.now() - this.lastCompletedAt < getPaymentPollIntervalSeconds(this.database) * 1_000) return;
-    await Promise.race([
-      this.scanNow("order_query"),
-      new Promise<void>((resolve) => setTimeout(resolve, 3_000)),
-    ]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        this.scanNow("order_query"),
+        new Promise<void>((resolve) => { timer = setTimeout(resolve, 3_000); }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   scanNow(reason = "manual") {
@@ -174,6 +238,7 @@ export class PaymentScanner {
   }
 
   private async performScan(reason: string): Promise<ScanResult> {
+    const deadline = performance.now() + (this.timeouts.scanTimeoutMs ?? PAYMENT_SCAN_TIMEOUT_MS);
     let candidates = getActiveOrders(this.database);
     const startedAt = new Date().toISOString();
     const run = this.database.query(`
@@ -199,7 +264,16 @@ export class PaymentScanner {
       let totalSize = Number.POSITIVE_INFINITY;
 
       while ((pageNo - 1) * pageSize < totalSize) {
-        const page = await this.provider.query({ startTime, endTime, pageNo, pageSize });
+        const remainingMs = deadline - performance.now();
+        const queryTimeoutMs = this.timeouts.queryTimeoutMs ?? ACCOUNT_LOG_QUERY_TIMEOUT_MS;
+        const scanTimeout = new AppError(504, "SCAN_TIMEOUT", "本次扫账超过总时限，已结束；后续扫描会自动重试");
+        if (remainingMs <= 0) throw scanTimeout;
+        const page = await queryAccountLogPage(
+          this.provider,
+          { startTime, endTime, pageNo, pageSize },
+          Math.min(queryTimeoutMs, remainingMs),
+          remainingMs <= queryTimeoutMs ? scanTimeout : undefined,
+        );
         pages += 1;
         totalSize = page.totalSize || page.details.length;
         traceId ||= page.traceId;
@@ -232,6 +306,10 @@ export class PaymentScanner {
       this.database.query(`
         UPDATE scan_runs SET status = 'error', finished_at = ?, pages = ?, records = ?, matched = ?, error = ?, trace_id = ? WHERE id = ?
       `).run(new Date().toISOString(), pages, records, matched, message.slice(0, 2_000), traceId || null, run.id);
+      audit(this.database, "payment.scan_failed", { details: {
+        reason, scan_id: run.id, pages, records, matched, trace_id: traceId || null,
+        code: error instanceof AppError ? error.code : "SCAN_FAILED", message: message.slice(0, 2_000),
+      } });
       throw error;
     }
   }

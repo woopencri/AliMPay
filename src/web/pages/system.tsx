@@ -2,6 +2,7 @@ import { CheckCircle2, Database, HardDrive, LockKeyhole, Server, XCircle } from 
 import { type FormEvent, useState } from "react";
 import useSWR from "swr";
 import { toast } from "sonner";
+import type { ScanRun } from "@/shared/contracts";
 import { apiFetch, jsonBody, swrFetcher } from "@/web/api";
 import { PageHeader } from "@/web/components/page-header";
 import { Badge } from "@/web/components/ui/badge";
@@ -22,7 +23,7 @@ interface SystemData {
   callbacks_private_allowed: boolean;
 }
 
-interface ScanResponse { data: Array<Record<string, unknown>> }
+interface ScanResponse { data: ScanRun[] }
 
 function HealthRow({ label, ready, detail }: { label: string; ready: boolean; detail: string }) {
   return <div className="flex items-start justify-between gap-4 border-t py-3"><div><div className="text-sm font-medium">{label}</div><p className="mt-1 text-xs text-muted">{detail}</p></div>{ready ? <CheckCircle2 className="size-5 shrink-0 text-success" /> : <XCircle className="size-5 shrink-0 text-destructive" />}</div>;
@@ -69,9 +70,9 @@ export function SystemPage() {
       </div>
 
       <Card className="mt-6">
-        <CardHeader><CardTitle>最近扫描</CardTitle><CardDescription>没有有效监控订单时，上游请求为零并记录 skipped。</CardDescription></CardHeader>
+        <CardHeader><CardTitle>最近扫描</CardTitle><CardDescription>无待确认订单时不请求支付宝。扫描超时后会自动结束并在后续重试，具体原因见下方记录。</CardDescription></CardHeader>
         <CardContent>
-          {!scans?.data.length ? <div className="py-10 text-center text-sm text-muted">暂无扫描记录</div> : <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><thead className="border-b text-xs text-muted"><tr><th className="pb-3 font-medium">开始时间</th><th className="pb-3 font-medium">状态</th><th className="pb-3 font-medium">活动订单</th><th className="pb-3 font-medium">页 / 记录 / 匹配</th><th className="pb-3 font-medium">Trace ID</th></tr></thead><tbody className="divide-y">{scans.data.map((scan) => <tr key={String(scan.id)}><td className="py-3 text-xs">{formatDate(String(scan.started_at))}</td><td className="py-3"><Badge variant={scan.status === "success" ? "success" : scan.status === "error" ? "danger" : "outline"}>{String(scan.status)}</Badge></td><td className="py-3">{String(scan.active_orders)}</td><td className="py-3 font-mono text-xs">{String(scan.pages)} / {String(scan.records)} / {String(scan.matched)}</td><td className="max-w-52 truncate py-3 font-mono text-xs text-muted">{String(scan.trace_id ?? "—")}</td></tr>)}</tbody></table></div>}
+          {!scans?.data.length ? <div className="py-10 text-center text-sm text-muted">暂无扫描记录</div> : <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><thead className="border-b text-xs text-muted"><tr><th className="pb-3 font-medium">开始时间</th><th className="pb-3 font-medium">状态</th><th className="pb-3 font-medium">活动订单</th><th className="pb-3 font-medium">页 / 记录 / 匹配</th><th className="pb-3 font-medium">Trace ID</th><th className="pb-3 font-medium">错误原因</th></tr></thead><tbody className="divide-y">{scans.data.map((scan) => <tr key={String(scan.id)}><td className="py-3 text-xs">{formatDate(String(scan.started_at))}</td><td className="py-3"><Badge variant={scan.status === "success" ? "success" : scan.status === "error" ? "danger" : "outline"}>{String(scan.status)}</Badge></td><td className="py-3">{String(scan.active_orders)}</td><td className="py-3 font-mono text-xs">{String(scan.pages)} / {String(scan.records)} / {String(scan.matched)}</td><td className="max-w-52 truncate py-3 font-mono text-xs text-muted">{String(scan.trace_id ?? "—")}</td><td className="min-w-56 max-w-sm whitespace-normal break-words py-3 text-xs text-destructive">{scan.error || "—"}</td></tr>)}</tbody></table></div>}
         </CardContent>
       </Card>
 
